@@ -34,6 +34,7 @@ func ListNetworks(cs *cloudstack.CloudStackClient, domainId string) ([]*cloudsta
 	page := 1
 	p := cs.Network.NewListNetworksParams()
 	p.SetDomainid(domainId)
+	p.SetAcltype("Domain")
 	p.SetListall(true)
 	p.SetZoneid(config.ZoneId)
 	p.SetPagesize(config.PageSize)

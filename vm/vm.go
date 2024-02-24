@@ -49,7 +49,7 @@ func ListVMs(cs *cloudstack.CloudStackClient, domainId string) ([]*cloudstack.Vi
 }
 
 func DeployVm(cs *cloudstack.CloudStackClient, domainId string, networkId string, account string) (*cloudstack.DeployVirtualMachineResponse, error) {
-	vmName := "Vm-" + utils.RandomString(10)
+	vmName := "vm-csbench-" + utils.RandomString(10)
 	p := cs.VirtualMachine.NewDeployVirtualMachineParams(config.ServiceOfferingId, config.TemplateId, vmName)
 	p.SetDomainid(domainId)
 	p.SetZoneid(config.ZoneId)
@@ -67,10 +67,13 @@ func DeployVm(cs *cloudstack.CloudStackClient, domainId string, networkId string
 }
 
 func DestroyVm(cs *cloudstack.CloudStackClient, vmId string) error {
-
+	err := StopVM(cs, vmId, true)
+	if err != nil {
+		return err
+	}
 	deleteParams := cs.VirtualMachine.NewDestroyVirtualMachineParams(vmId)
 	deleteParams.SetExpunge(true)
-	_, err := cs.VirtualMachine.DestroyVirtualMachine(deleteParams)
+	_, err = cs.VirtualMachine.DestroyVirtualMachine(deleteParams)
 	if err != nil {
 		log.Printf("Failed to destroy Vm with Id %s due to %v", vmId, err)
 		return err
@@ -88,8 +91,9 @@ func StartVM(cs *cloudstack.CloudStackClient, vmId string) error {
 	return nil
 }
 
-func StopVM(cs *cloudstack.CloudStackClient, vmId string) error {
+func StopVM(cs *cloudstack.CloudStackClient, vmId string, forced bool) error {
 	p := cs.VirtualMachine.NewStopVirtualMachineParams(vmId)
+	p.SetForced(forced)
 	_, err := cs.VirtualMachine.StopVirtualMachine(p)
 	if err != nil {
 		log.Printf("Failed to stop vm with id %s due to %v", vmId, err)

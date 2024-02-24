@@ -39,6 +39,7 @@ import (
 	"github.com/apache/cloudstack-go/v2/cloudstack"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/montanaflynn/stats"
+	probing "github.com/prometheus-community/pro-bing"
 	"github.com/sourcegraph/conc/pool"
 )
 
@@ -312,7 +313,7 @@ func executeVMAction(vmAction *string, workers *int) map[string][]*Result {
 	workerPool := pool.NewWithResults[map[string]*Result]().WithMaxGoroutines(*workers)
 	for _, profile := range profiles {
 		if profile.Name == "admin" {
-			cs = cloudstack.NewAsyncClient(config.URL, profile.ApiKey, profile.SecretKey, false)
+			cs = cloudstack.NewAsyncClient(config.URL, profile.ApiKey, profile.SecretKey, false, cloudstack.WithAsyncTimeout(1800))
 		}
 	}
 
@@ -353,7 +354,7 @@ func executeVMAction(vmAction *string, workers *int) map[string][]*Result {
 			switch virtualMachine.State {
 			case "Running":
 				if *vmAction == "stop" || *vmAction == "toggle" || *vmAction == "random" {
-					err := vm.StopVM(cs, virtualMachine.Id)
+					err := vm.StopVM(cs, virtualMachine.Id, false)
 					result = err == nil
 					action = "stop"
 				} else if *vmAction == "reboot" {
@@ -404,7 +405,7 @@ func createResources(domainFlag, limitsFlag, networkFlag, vmFlag, volumeFlag *bo
 			numVmsPerNetwork := config.NumVms
 			numVolumesPerVM := config.NumVolumes
 
-			cs := cloudstack.NewAsyncClient(apiURL, profile.ApiKey, profile.SecretKey, false)
+			cs := cloudstack.NewAsyncClient(apiURL, profile.ApiKey, profile.SecretKey, false, cloudstack.WithAsyncTimeout(1800))
 
 			var results = make(map[string][]*Result)
 
@@ -567,6 +568,8 @@ func createVms(workerPool *pool.ResultPool[*Result], cs *cloudstack.CloudStackCl
 		account := domain.ListAccounts(cs, domains[i].Id)
 		accounts = append(accounts, account...)
 	}
+	account := domain.ListAccounts(cs, parentDomainId)
+	accounts = append(accounts, account...)
 
 	domainIdAccountMapping := make(map[string]*cloudstack.Account)
 	for _, account := range accounts {
@@ -579,6 +582,10 @@ func createVms(workerPool *pool.ResultPool[*Result], cs *cloudstack.CloudStackCl
 		network, _ := network.ListNetworks(cs, domain.Id)
 		allNetworks = append(allNetworks, network...)
 	}
+
+	log.Infof("Fetching usable networks in parent domain %s", parentDomainId)
+	network, _ := network.ListNetworks(cs, parentDomainId)
+	allNetworks = append(allNetworks, network...)
 
 	progressMarker := int(math.Max(float64(len(allNetworks)*numVmPerNetwork)/10.0, 5))
 	counter := 0
@@ -593,12 +600,19 @@ func createVms(workerPool *pool.ResultPool[*Result], cs *cloudstack.CloudStackCl
 			}
 			workerPool.Go(func() *Result {
 				taskStart := time.Now()
-				_, err := vm.DeployVm(cs, network.Domainid, network.Id, domainIdAccountMapping[network.Domainid].Name)
+				vm, err := vm.DeployVm(cs, network.Domainid, network.Id, domainIdAccountMapping[network.Domainid].Name)
 				if err != nil {
 					return &Result{
 						Success:  false,
 						Duration: time.Since(taskStart).Seconds(),
 					}
+				}
+				ip := vm.Nic[0].Ipaddress
+				pinged := waitPing(ip, 300)
+				if !pinged {
+					log.Errorf("Failed to ping VM %s(%s) after it was created", vm.Name, ip)
+				} else {
+					log.Infof("Pinged %s(%s)", vm.Name, ip)
 				}
 				return &Result{
 					Success:  true,
@@ -624,6 +638,8 @@ func createVolumes(workerPool *pool.ResultPool[*Result], cs *cloudstack.CloudSta
 		}
 		allVMs = append(allVMs, vms...)
 	}
+	vms, _ := vm.ListVMs(cs, parentDomainId)
+	allVMs = append(allVMs, vms...)
 
 	progressMarker := int(math.Max(float64(len(allVMs)*numVolumesPerVM)/10.0, 5))
 	start := time.Now()
@@ -681,7 +697,7 @@ func tearDownEnv(domainFlag, networkFlag, vmFlag, volumeFlag *bool, workers *int
 	for _, profile := range profiles {
 		userProfileName := profile.Name
 		if userProfileName == "admin" {
-			cs := cloudstack.NewAsyncClient(apiURL, profile.ApiKey, profile.SecretKey, false)
+			cs := cloudstack.NewAsyncClient(apiURL, profile.ApiKey, profile.SecretKey, false, cloudstack.WithAsyncTimeout(1800))
 
 			var results = make(map[string][]*Result)
 
@@ -723,6 +739,8 @@ func destroyVms(workerPool *pool.ResultPool[*Result], cs *cloudstack.CloudStackC
 		}
 		allVMs = append(allVMs, vms...)
 	}
+	vms, _ := vm.ListVMs(cs, parentDomainId)
+	allVMs = append(allVMs, vms...)
 
 	progressMarker := int(math.Max(float64(len(allVMs))/10.0, 5))
 	start := time.Now()
@@ -805,6 +823,8 @@ func deleteVolumes(workerPool *pool.ResultPool[*Result], cs *cloudstack.CloudSta
 		volumes, _ := volume.ListVolumes(cs, domain.Id)
 		allVolumes = append(allVolumes, volumes...)
 	}
+	volumes, _ := volume.ListVolumes(cs, parentDomainId)
+	allVolumes = append(allVolumes, volumes...)
 
 	progressMarker := int(math.Max(float64(len(allVolumes))/10.0, 5))
 	start := time.Now()
@@ -864,4 +884,17 @@ func deleteDomains(workerPool *pool.ResultPool[*Result], cs *cloudstack.CloudSta
 	res := workerPool.Wait()
 	log.Infof("Deleted %d domains in %.2f seconds", len(domains), time.Since(start).Seconds())
 	return res
+}
+
+func waitPing(host string, timeoutSeconds int) (pinged bool) {
+	for i := 0; i < timeoutSeconds; i++ {
+		pinger, err := probing.NewPinger(host)
+		pinger.Count = 1
+		pinger.Timeout = time.Second
+		err = pinger.Run()
+		if err == nil && pinger.Statistics().PacketsRecv > 0 {
+			pinged = true
+		}
+	}
+	return
 }
