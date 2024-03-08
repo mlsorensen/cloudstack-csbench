@@ -55,6 +55,7 @@ var VlanEnd = 1000
 var StartVM = true
 var NumVms = 1
 var NumVolumes = 1
+var UserdataBase64 = ""
 
 func ReadProfiles(filePath string) (map[int]*Profile, error) {
 	file, err := os.Open(filePath)
@@ -137,6 +138,8 @@ func ReadProfiles(filePath string) (map[int]*Profile, error) {
 					TemplateId = value
 				case "parentdomainid":
 					ParentDomainId = value
+				case "userdatabase64":
+					UserdataBase64 = value
 				case "numdomains":
 					var numDomains int
 					_, err := fmt.Sscanf(value, "%d", &numDomains)

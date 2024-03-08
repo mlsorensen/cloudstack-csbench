@@ -57,6 +57,7 @@ func DeployVm(cs *cloudstack.CloudStackClient, domainId string, networkId string
 	p.SetName(vmName)
 	p.SetAccount(account)
 	p.SetStartvm(config.StartVM)
+	p.SetUserdata(config.UserdataBase64)
 
 	resp, err := cs.VirtualMachine.DeployVirtualMachine(p)
 	if err != nil {
