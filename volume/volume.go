@@ -51,7 +51,7 @@ func ListVolumes(cs *cloudstack.CloudStackClient, domainId string) ([]*cloudstac
 }
 
 func CreateVolume(cs *cloudstack.CloudStackClient, domainId string, account string) (*cloudstack.CreateVolumeResponse, error) {
-	volName := "Volume-" + utils.RandomString(10)
+	volName := "vol-csbench-" + utils.RandomString(10)
 	p := cs.Volume.NewCreateVolumeParams()
 	p.SetDomainid(domainId)
 	p.SetName(volName)
