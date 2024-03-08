@@ -20,9 +20,8 @@ package vm
 import (
 	"csbench/config"
 	"csbench/utils"
-	"log"
-
 	"github.com/apache/cloudstack-go/v2/cloudstack"
+	"log"
 )
 
 func ListVMs(cs *cloudstack.CloudStackClient, domainId string) ([]*cloudstack.VirtualMachine, error) {
@@ -58,6 +57,9 @@ func DeployVm(cs *cloudstack.CloudStackClient, domainId string, networkId string
 	p.SetAccount(account)
 	p.SetStartvm(config.StartVM)
 	p.SetUserdata(config.UserdataBase64)
+	if config.RootSize > 0 {
+		p.SetRootdisksize(int64(config.RootSize))
+	}
 
 	resp, err := cs.VirtualMachine.DeployVirtualMachine(p)
 	if err != nil {

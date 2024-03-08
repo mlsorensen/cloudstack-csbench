@@ -56,6 +56,7 @@ var StartVM = true
 var NumVms = 1
 var NumVolumes = 1
 var UserdataBase64 = ""
+var RootSize = 0
 
 func ReadProfiles(filePath string) (map[int]*Profile, error) {
 	file, err := os.Open(filePath)
@@ -113,6 +114,12 @@ func ReadProfiles(filePath string) (map[int]*Profile, error) {
 					_, err := fmt.Sscanf(value, "%d", &pagesize)
 					if err == nil {
 						PageSize = pagesize
+					}
+				case "rootsize":
+					var rootsize int
+					_, err := fmt.Sscanf(value, "%d", &rootsize)
+					if err == nil {
+						RootSize = rootsize
 					}
 				case "expires":
 					var expires int
